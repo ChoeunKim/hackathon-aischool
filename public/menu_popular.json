@@ -9,7 +9,6 @@
   },
   {
     "id": 2,
-<<<<<<< HEAD
     "name": "쉬림프",
     "eng": "shr",
     "image": "/img/menu/shrimp.png",
@@ -33,20 +32,3 @@
     "big": "19,900원"
   }
 ]
-=======
-    "name": "터키",
-    "eng": "tuna",
-    "image": "/img/menu/turkey.png",
-    "small": "8,900원",
-    "big": "16,900원"
-  },
-  {
-    "id": 3,
-    "name": "터키",
-    "eng": "tuna",
-    "image": "/img/menu/turkey.png",
-    "small": "8,900원",
-    "big": "16,900원"
-  }
-]
->>>>>>> origin/main
