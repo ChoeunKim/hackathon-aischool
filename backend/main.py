@@ -64,6 +64,9 @@ KIOSK_NLU_SCHEMA = {
                     "ORDER_CONFIRM",
                     "GO_BACK",
                     "SET_INGREDIENTS",
+                    "CANCEL_ORDER",     # NEW
+                    "CONFIRM_YES",      # NEW
+                    "CONFIRM_NO",       # NEW
                     "NONE"
                 ]
             },
@@ -169,6 +172,14 @@ async def nlu(payload: dict):
 
     t = text.replace(" ", "")
 
+    # 전역 취소/확인
+    if any(kw in t for kw in ["취소","그만","홈으로","주문취소","처음으로가"]):
+        return {"intent":"CANCEL_ORDER","slots":{}}
+    if any(kw in t for kw in ["예","네","응","맞아","맞습니다","그래"]):
+        return {"intent":"CONFIRM_YES","slots":{}}
+    if any(kw in t for kw in ["아니오","아니","아냐","취소하지마","계속"]):
+        return {"intent":"CONFIRM_NO","slots":{}}   
+
     # 공통 의도
     if any(kw in t for kw in ["주문하기","주문해줘","결제"]):
         return {"intent":"ORDER_CONFIRM","slots":{}}
@@ -253,6 +264,8 @@ def nlu_llm(payload: dict = Body(...)):
         "You are a strict NLU for a kiosk. "
         "Output MUST be valid JSON following the provided schema. "
         "Map Korean speech to intents and slots. "
+        "If user says cancel/stop/home (e.g., '취소','그만','홈으로','주문 취소'), return intent=CANCEL_ORDER. "
+        "If user answers confirmation like '예/네/응', return CONFIRM_YES; if '아니오/아니', return CONFIRM_NO. "
         "If menu number exceeds available range, still return SELECT_MENU but without menu_number. "
         "Ingredients must be chosen only from known_ingredients. "
         "Ops: ADD(추가/넣어), EXCLUDE(빼/제외), ALL(전부/모두), ONLY(~만). "
