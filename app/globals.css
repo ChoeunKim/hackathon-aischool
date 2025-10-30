@@ -1,26 +1,83 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ───────────────── Subway Theme ───────────────── */
+:root{
+  /* brand */
+  --sub-green:  #006241;
+  --sub-yellow: #FEDD00;
+  --sub-dark:   #004C3F;
+
+  /* surface & text */
+  --bg:   #F6F7F6;
+  --card: #FFFFFF;
+  --ink:  #0F172A;
+
+  /* border & shadow */
+  --line: #E5E7EB;
+  --shadow: 0 6px 18px rgba(0,0,0,.06);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
+/* 다크모드(옵션) */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root{
+    --bg:#0B0E0C; --card:#0F1311; --ink:#E6EAE8; --line:#1F2622;
+    --sub-dark:#68D391; /* 밝은 초록 대체 */
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ───────────────── Base ───────────────── */
+html,body,#__next{height:100%}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", Apple SD Gothic Neo, "맑은 고딕", Helvetica, Arial, sans-serif;
 }
+
+/* ───────────────── UI Utilities ───────────────── */
+.container-narrow{max-width:1024px; margin:0 auto; padding:24px}
+
+.card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:16px;
+  box-shadow:var(--shadow);
+  padding:14px;
+}
+
+.btn{ 
+  display:inline-flex; align-items:center; justify-content:center;
+  padding:10px 16px; border-radius:14px; font-weight:600;
+  border:1px solid var(--line); background:#fff; color:var(--ink);
+}
+.btn:hover{ filter:brightness(.98) }
+
+.btn-sub{ background:var(--sub-green); color:#fff; border:none }
+.btn-sub:hover{ filter:brightness(.95) }
+.btn-ghost{ background:transparent }
+.btn-yellow{ background:var(--sub-yellow); color:#000; border:none }
+
+.badge{
+  display:inline-block; padding:4px 10px; border-radius:9999px;
+  border:1px solid var(--line); font-size:12px; color:#475569; background:#fff;
+}
+
+.chip{
+  display:inline-block; padding:6px 12px; border-radius:9999px; border:1px solid var(--line); margin:4px 6px 0 0; background:#fff;
+}
+.chip.miss{ border-color:#EF4444; color:#DC2626; background:#FFF1F2 }
+.chip.maybe{ border-color:#F59E0B; color:#B45309; background:#FFFBEB }
+
+.kiosk-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:14px }
+@media (min-width: 768px){ .kiosk-grid{ grid-template-columns:repeat(5,1fr) } }
+
+/* 이미지 영역 통일감 */
+.thumb{
+  width:100%; height:110px; object-fit:contain; background:#FAFAFA; border-radius:12px; border:1px solid var(--line);
+}
+
+/* 링크 */
+a.link{ color:var(--sub-green); text-decoration:underline; text-underline-offset:2px }
+
+/* 스크롤(부드럽게) */
+*{ scroll-behavior:smooth }
+
