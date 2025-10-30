@@ -1,0 +1,17 @@
+[
+  {
+    "id": 3,
+    "name": "에그마요",
+    "eng": "egg",
+    "image": "/img/menu/egg-mayo.png",
+    "shortdesc": "부드러운 달걀과 고소한 마요네즈가 만나 더 부드러운 스테디 셀러",
+    "longdesc": "에그마요 2스쿱과 슈레드 치즈, 야채 5종(오이, 양파, 피망, 양상추, 토마토)이 포함되어 있습니다.\n소스는 렌치 소스와 스위트 칠리 소스입니다.",
+    "veggies": {
+      "lettuce": true,
+      "tomato": true,
+      "cucumber": true,
+      "onion": true,
+      "greenPepper": true
+    }
+  }
+]

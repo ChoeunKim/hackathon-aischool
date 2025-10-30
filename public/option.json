@@ -1,0 +1,101 @@
+[
+  {
+    "id": 1,
+    "name": "양상추",
+    "image": "/img/menu/양상추.png"
+  },
+  {
+  "id": 2,
+    "name": "토마토",
+    "image": "/img/menu/토마토.png"
+  },
+  {
+  "id": 3,
+    "name": "오이",
+    "image": "/img/menu/오이.png"
+  },
+  {
+  "id": 4,
+    "name": "피망",
+    "image": "/img/menu/피망.png"
+  },
+  {
+  "id": 5,
+    "name": "아보카도",
+    "image": "/img/menu/아보카도.png"
+  },
+  {
+  "id": 6,
+    "name": "양파",
+    "image": "/img/menu/양파.png"
+  },
+  {
+  "id": 7,
+    "name": "올리브",
+    "image": "/img/menu/올리브.png"
+  },
+  {
+  "id": 8,
+    "name": "피클",
+    "image": "/img/menu/피클.png"
+  },
+  {
+  "id": 9,
+    "name": "랜치",
+    "image": "/img/menu/랜치.png"
+  },
+  {
+  "id": 10,
+    "name": "레드와인식초",
+    "image": "/img/menu/레드와인식초.png"
+  },
+  {
+  "id": 11,
+    "name": "마요네즈",
+    "image": "/img/menu/마요네즈.png"
+  },
+  {
+  "id": 12,
+    "name": "사우스웨스트치폴레",
+    "image": "/img/menu/사우스웨스트치폴레.png"
+  },
+  {
+  "id": 13,
+    "name": "스모크바비큐",
+    "image": "/img/menu/스모크바비큐.png"
+  },
+  {
+  "id": 14,
+    "name": "스위트어니언",
+    "image": "/img/menu/스위트어니언.png"
+  },
+  {
+  "id": 15,
+    "name": "스위트칠리",
+    "image": "/img/menu/스위트칠리.png"
+  },
+  {
+  "id": 16,
+    "name": "허니머스타드",
+    "image": "/img/menu/허니머스타드.png"
+  },{
+  "id": 17,
+    "name": "핫칠리",
+    "image": "/img/menu/핫칠리.png"
+  },
+  {
+  "id": 18,
+    "name": "소금",
+    "image": "/img/menu/소금.png"
+  },
+  {
+  "id": 19,
+    "name": "후추",
+    "image": "/img/menu/후추.png"
+  },
+  {
+  "id": 20,
+    "name": "엑스트라버진올리브오일",
+    "image": "/img/menu/엑스트라버진올리브오일.png"
+  }
+]
