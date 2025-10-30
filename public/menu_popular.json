@@ -1,5 +1,26 @@
 [
-  {"id":1,"name":"터키","desc":"담백한 터키 슬라이스","image":"/img/menu/turkey.png"},
-  {"id":2,"name":"슈림프","desc":"탱글한 새우가 듬뿍","image":"/img/menu/shrimp.png"},
-  {"id":3,"name":"에그마요","desc":"부드러운 에그마요 필링","image":"/img/menu/egg-mayo.png"}
+  {
+    "id": 1,
+    "name": "터키",
+    "eng": "tuna",
+    "image": "/img/menu/turkey.png",
+    "small": "8,900원",
+    "big": "16,900원"
+  },
+  {
+    "id": 2,
+    "name": "터키",
+    "eng": "tuna",
+    "image": "/img/menu/turkey.png",
+    "small": "8,900원",
+    "big": "16,900원"
+  },
+  {
+    "id": 3,
+    "name": "터키",
+    "eng": "tuna",
+    "image": "/img/menu/turkey.png",
+    "small": "8,900원",
+    "big": "16,900원"
+  }
 ]
