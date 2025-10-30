@@ -1,7 +1,42 @@
 {
-  "mains": ["터키", "슈림프", "이탈리안 비엠티", "에그마요"],
-  "breads": ["허니오트", "하티", "플랫브레드", "파마산 오레가노"],
-  "cheeses": ["아메리칸", "모차렐라", "슈레드"],
-  "veggies": ["양상추","토마토","오이","피망","양파","피클","올리브","할라피뇨"],
-  "sauces": ["스위트칠리","스위트어니언","마요네즈","핫칠리","사우스웨스트","홀그레인머스터드"]
+  "mains": [
+    { "id": 1, "name": "터키", "slug": "turkey", "image": "/img/menu/turkey.png", "aliases": ["터키", "터키 샌드위치"], "selected": true },
+    { "id": 2, "name": "슈림프", "slug": "shrimp", "image": "/img/menu/shrimp.png", "aliases": ["슈림프", "쉬림프", "슈렘프"], "selected": true },
+    { "id": 3, "name": "이탈리안 비엠티", "slug": "italian-bmt", "aliases": ["이탈리안 비엠티", "비엠티", "bmt"], "selected": true },
+    { "id": 4, "name": "에그마요", "slug": "egg-mayo", "image": "/img/menu/egg-mayo.png", "aliases": ["에그마요", "에그 마요"], "selected": true }
+  ],
+  "breads": [
+    { "name": "허니오트", "aliases": ["허니오트", "허니 오트", "허니오트빵"], "selected": true  },
+    { "name": "하티", "aliases": ["하티"], "selected": true  },
+    { "name": "플랫브레드", "aliases": ["플랫 브레드", "플랫브레드"], "selected": true  },
+    { "name": "파마산 오레가노", "aliases": ["파마산 오레가노", "파마산오레가노"], "selected": true  }
+  ],
+  "cheeses": [
+    { "name": "아메리칸", "aliases": ["아메리칸", "아메리칸 치즈"], "selected": true  },
+    { "name": "모차렐라", "aliases": ["모차렐라", "모짜렐라", "모짜"], "selected": true  },
+    { "name": "슈레드", "aliases": ["슈레드", "슈레드 치즈"], "selected": true  }
+  ],
+  "veggies": [
+    { "name": "양상추", "image": "/img/menu/양상추.png", "aliases": ["양상추", "상추"], "selected": true  },
+    { "name": "토마토", "image": "/img/menu/토마토.png", "aliases": ["토마토"], "selected": true  },
+    { "name": "오이", "image": "/img/menu/오이.png", "aliases": ["오이", "오이 넣어줘"], "selected": true  },
+    { "name": "피망", "image": "/img/menu/피망.png", "aliases": ["피망", "파프리카"], "selected": true  },
+    { "name": "양파", "image": "/img/menu/양파.png", "aliases": ["양파"], "selected": true  },
+    { "name": "피클", "image": "/img/menu/피클.png", "aliases": ["피클"], "selected": true },
+    { "name": "할라피뇨", "image": "/img/menu/할라피뇨.png", "aliases": ["할라피뇨", "할라피뇨 넣어줘"], "selected": true },
+    { "name": "올리브", "image": "/img/menu/올리브.png", "aliases": ["올리브", "올리브 넣어줘"], "selected": true }
+  ],
+  "sauces": [
+    { "name": "스위트칠리", "image": "/img/menu/스위트칠리.png", "aliases": ["스위트칠리", "스윗칠리"], "selected": true  },
+    { "name": "스위트어니언", "image": "/img/menu/스위트어니언.png", "aliases": ["스위트어니언", "스윗어니언"], "selected": true  },
+    { "name": "마요네즈", "image": "/img/menu/마요네즈.png", "aliases": ["마요네즈", "마요"], "selected": true  },
+    { "name": "핫칠리", "image": "/img/menu/핫칠리.png", "aliases": ["핫칠리"], "selected": true  },
+    { "name": "사우스웨스트", "image": "/img/menu/사우스웨스트치폴레.png", "aliases": ["사우스웨스트", "사우스웨스트 치폴레", "치폴레"], "selected": true  },
+    { "name": "홀그레인머스터드", "image": "/img/menu/허니머스터드.png", "aliases": ["홀그레인머스터드", "홀그레인 머스타드", "머스터드"], "selected": true  },
+    { "name": "랜치", "image": "/img/menu/랜치.png", "aliases": ["랜치", "랜치 드레싱"], "selected": true  },
+    { "name": "스모크바비큐", "image": "/img/menu/스모크바비큐.png", "aliases": ["바베큐", "바비큐"], "selected": true  },
+    { "name": "허니머스타드", "image": "/img/menu/허니머스타드.png", "aliases": ["허니머스타드", "허니 머스타드"], "selected": true  },
+    { "name": "레드와인식초", "image": "/img/menu/레드와인식초.png", "aliases": ["레드와인","와인","식초"], "selected": true  },
+    { "name": "엑스트라버진올리브오일", "image": "/img/menu/엑스트라버진올리브오일.png", "aliases": ["엑스트라버진올리브오일", "엑스트라버진 올리브 오일","오일","액스트라"], "selected": true }
+  ]
 }
