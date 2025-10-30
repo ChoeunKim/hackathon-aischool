@@ -1,1042 +1,714 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Volume2, ShoppingCart, ArrowLeft, Check, X, Plus, Minus } from "lucide-react";
+import React, { JSX, useEffect, useMemo, useRef, useState } from "react";
+import { Mic, MicOff, Volume2, ShoppingCart, Home, Plus, Minus, Check, CircleHelp } from "lucide-react";
+import { normalizeReceipt } from "@/mapping/receiptMapper";
 
-const API = "http://localhost:8000";
+
+const API = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 const USE_LLM_NLU = true;
 
 type Menu = {
   id: number;
   name: string;
-  description: string;
-  image_url: string;
-  price_cents: number;
+  description: string | null;
+  image_url: string | null;
+  price_cents: number | null;
   price_15_cents?: number | null;
   price_30_cents?: number | null;
   popular_rank: number;
 };
 
-type Ingredient = {
-  id: number;
-  name: string;
-  type: string;
-};
-
-type KioskState =
-  | "START"
-  | "MAIN_MENU"
-  | "MENU_DETAIL"
-  | "VEGETABLE_SELECTION"
-  | "ORDER_CONFIRM"
-  | "END";
+type Ingredient = { id: number; name: string; type: "bread"|"cheese"|"vegetable"|"sauce"|"extra"|string };
 
 type IngredientOps = { ADD: string[]; EXCLUDE: string[] };
+
 type CartItem = {
   menu_id: number;
   name: string;
   size_cm: 15 | 30;
   quantity: number;
+  picks: { bread?: string | null; cheese?: string | null; vegetables: string[]; sauces: string[]; extras: string[] };
   ingredients_ops: IngredientOps;
 };
 
-function speakKo(text: string) {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = "ko-KR";
-  u.rate = 1.0;
-  u.pitch = 1.0;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(u);
-}
-const uniq = (arr: string[]) => Array.from(new Set(arr));
+type KioskState =
+  | "START" | "MODE_SELECT" | "THEME_SELECT" | "BREAD_SELECT" | "CHEESE_SELECT" | "VEGE_SELECT" | "SAUCE_SELECT" | "EXTRA_SELECT" | "REVIEW" | "RECO_LIST" | "RECO_DETAIL" | "PAYMENT" | "END";
 
-export default function Page() {
-  // ---- UI / STT ----
+function speakKo(text: string) {
+  if (typeof window === "undefined") return;
+  const ss = (window as any).speechSynthesis as SpeechSynthesis | undefined;
+  if (!ss) return;
+  ss.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "ko-KR"; u.rate = 1.0; u.pitch = 1.0; ss.speak(u);
+}
+const cents = (n?: number | null) => (typeof n === "number" && Number.isFinite(n) ? n : 0);
+const toKRW = (c: number) => `₩${(c / 100).toLocaleString()}`;
+const uniq = (arr: string[]) => Array.from(new Set(arr));
+const buildOps = (p: CartItem["picks"]): IngredientOps => ({ ADD: uniq([...(p.vegetables||[]), ...(p.sauces||[]), ...(p.extras||[])]), EXCLUDE: [] });
+
+export default function Page(): JSX.Element {
   const [isRecording, setIsRecording] = useState(false);
   const [audioURL, setAudioURL] = useState<string>("");
   const [sttText, setSttText] = useState<string>("");
   const [status, setStatus] = useState<string>("idle");
 
-  // ---- Data ----
   const [menus, setMenus] = useState<Menu[]>([]);
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [menusLoading, setMenusLoading] = useState(false);
   const [menusError, setMenusError] = useState<string | null>(null);
-  const [selectedMenu, setSelectedMenu] = useState<Menu | null>(null);
 
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-  const [orderId, setOrderId] = useState<number | null>(null); // 확정 시 생성
-  const [receipt, setReceipt] = useState<any>(null);           // 확정 후 서버 영수증
-  const [cart, setCart] = useState<CartItem[]>([]);            // 로컬 장바구니
-  const [cancelConfirm, setCancelConfirm] = useState(false);   // 전역 취소 확인
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [working, setWorking] = useState<CartItem | null>(null);
+  const [orderId, setOrderId] = useState<number | null>(null);
+  const [receipt, setReceipt] = useState<any>(null);
 
-  const [sizeCm, setSizeCm] = useState<15 | 30>(15);
-  const [ingredientOps, setIngredientOps] = useState<IngredientOps>({ ADD: [], EXCLUDE: [] });
-
-  // ---- State Machine / NLU ----
+  const [cancelConfirm, setCancelConfirm] = useState(false);
   const [state, setState] = useState<KioskState>("START");
-  const [nluResult, setNluResult] = useState<any>(null);
 
-  // ---- MediaRecorder ----
+  useEffect(() => {
+    if (state !== "THEME_SELECT" && state !== "RECO_LIST") return;
+    let mounted = true;
+    (async () => {
+      setMenusLoading(true); setMenusError(null);
+      try {
+        const r = await fetch(`${API}/menus/popular`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const rows: Menu[] = await r.json();
+        if (mounted) setMenus(rows);
+      } catch (e) {
+        if (mounted) { setMenusError("인기 메뉴 조회 실패"); setMenus([]); }
+      } finally { if (mounted) setMenusLoading(false); }
+    })();
+    return () => { mounted = false; };
+  }, [state]);
+
+  useEffect(() => {
+    if (!["BREAD_SELECT","CHEESE_SELECT","VEGE_SELECT","SAUCE_SELECT","EXTRA_SELECT"].includes(state)) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const r = await fetch(`${API}/ingredients`);
+        const rows: Ingredient[] = await r.json();
+        if (mounted) setIngredients(rows);
+      } catch {
+        if (mounted) setIngredients([]);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [state]);
+
+  useEffect(() => {
+    switch (state) {
+      case "START": speakKo("시작을 누르면 추천 또는 직접 선택이 가능합니다."); break;
+      case "MODE_SELECT": speakKo("추천 메뉴 또는 직접 선택 중에서 선택해주세요."); break;
+      case "THEME_SELECT": speakKo("샌드위치 테마를 선택해주세요. K바비큐, 스테이크 앤 치즈, 로스트 치킨, 이탈리안 비엠티 등."); break;
+      case "BREAD_SELECT": speakKo("빵을 선택해주세요. 예: 허니오트, 플랫, 파마산오레가노, 위트. 또는 허니오트 선택 과 같이 말씀하세요."); break;
+      case "CHEESE_SELECT": speakKo("치즈를 선택해주세요. 예: 슈레드, 아메리칸, 모짜렐라. 또는 아메리칸 선택 과 같이 말씀하세요."); break;
+      case "VEGE_SELECT": speakKo("야채를 선택해주세요. 예: 양파 빼고 전부 추가해줘, 올리브만 넣어줘."); break;
+      case "SAUCE_SELECT": speakKo("소스를 선택해주세요. 랜치, 래디쉬, 올리브오일, 스위트칠리, 핫칠리, 레드와인식초, 마요네즈, 후추."); break;
+      case "EXTRA_SELECT": speakKo("추가 선택입니다. 에그마요, 페퍼로니, 베이컨, 아보카도, 오믈렛. 건너뛰기 가능."); break;
+      case "REVIEW": speakKo("주문 내역을 확인해주세요. 결제, 추가 주문, 취소 중 선택 가능합니다."); break;
+      case "RECO_LIST": speakKo("추천 메뉴 네 가지 중 하나를 선택해주세요."); break;
+      case "RECO_DETAIL": speakKo("이 조합 그대로 진행하시겠습니까? 예 또는 아니오를 선택해주세요."); break;
+      case "PAYMENT": speakKo("주문을 서버로 전송했습니다. 수량 변경이나 삭제가 가능합니다."); break;
+      case "END": speakKo("주문이 완료되었습니다. 감사합니다."); break;
+    }
+  }, [state]);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  const preferredTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/m4a"];
 
-  // -------- Effects --------
-  useEffect(() => {
-    switch (state) {
-      case "START":
-        speakKo("음성으로 주문하려면 버튼을 눌러주세요.");
-        break;
-      case "MAIN_MENU":
-        speakKo("원하는 메뉴의 번호를 말씀해주세요.");
-        break;
-      case "MENU_DETAIL":
-        speakKo("메뉴 설명을 듣고 싶으면 메뉴 설명해줘, 주문하려면 주문하기 라고 말해주세요.");
-        break;
-      case "VEGETABLE_SELECTION":
-        speakKo("예시: 양파 빼고 전부 추가해줘, 랜치 소스만 넣어줘.");
-        break;
-      case "ORDER_CONFIRM":
-        speakKo("주문 완료하시겠습니까? 주문하기, 추가 주문, 또는 취소라고 말씀해주세요.");
-        break;
-      case "END":
-        speakKo("주문이 완료되었습니다. 감사합니다.");
-        break;
-    }
-  }, [state]);
-
-  // MAIN_MENU: 메뉴 로드 + 화면 초기화 (주문 생성은 하지 않음)
-  useEffect(() => {
-    if (state !== "MAIN_MENU") return;
-
-    setSelectedMenu(null);
-    setReceipt(null);
-    setIngredientOps({ ADD: [], EXCLUDE: [] });
-    setSizeCm(15);
-
-    setMenusLoading(true);
-    setMenusError(null);
-    fetch(`${API}/menus/popular`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((data: Menu[]) => setMenus(data))
-      .catch((err) => {
-        console.error(err);
-        setMenusError("인기 메뉴 조회에 실패했습니다.");
-        setMenus([]);
-      })
-      .finally(() => setMenusLoading(false));
-  }, [state]);
-
-  // VEGETABLE_SELECTION: 재료 목록
-  useEffect(() => {
-    if (state !== "VEGETABLE_SELECTION") return;
-    fetch(`${API}/ingredients`)
-      .then((res) => res.json())
-      .then((rows: Ingredient[]) => setIngredients(rows))
-      .catch((err) => {
-        console.error("load ingredients failed", err);
-        setIngredients([]);
-      });
-  }, [state]);
-
-  // ORDER_CONFIRM: 서버 영수증(확정 전엔 receipt 없음)
-  useEffect(() => {
-    if (state !== "ORDER_CONFIRM" || !orderId) return;
-    fetch(`${API}/orders/${orderId}`)
-      .then((res) => res.json())
-      .then(setReceipt)
-      .catch((err) => {
-        console.error("get receipt failed", err);
-        setReceipt(null);
-      });
-  }, [state, orderId]);
-
-  // -------- Recording --------
-  const preferredTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
-  const startRecording = async () => {
-    setSttText("");
-    setStatus("requesting mic...");
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    let mimeType = "";
-    for (const t of preferredTypes) if ((MediaRecorder as any).isTypeSupported?.(t)) { mimeType = t; break; }
-    const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    mediaRecorderRef.current = mr;
-    chunksRef.current = [];
-    mr.ondataavailable = (e) => { if (e.data?.size) chunksRef.current.push(e.data); };
-    mr.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: mr.mimeType || "audio/webm" });
-      setAudioURL(URL.createObjectURL(blob));
-      setStatus(`recorded ${Math.round(blob.size / 1024)} KB`);
-      // 정지 즉시 전사 + NLU
-      uploadAndTranscribe(blob);
-    };
-    mr.start();
-    setIsRecording(true);
-    setStatus("recording...");
-  };
-  const stopRecording = () => {
-    const mr = mediaRecorderRef.current;
-    if (mr && mr.state !== "inactive") {
-      mr.stop();
-      mr.stream.getTracks().forEach((t) => t.stop());
-      setIsRecording(false);
-      setStatus("stopped");
-    }
-  };
-
-  const goHome = () => {
-    const mr = mediaRecorderRef.current;
-    if (mr && mr.state !== "inactive") {
-      mr.stop();
-      mr.stream.getTracks().forEach((t) => t.stop());
-      setIsRecording(false);
-    }
-    if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
-    setAudioURL("");
-    setSttText("");
-    setNluResult(null);
-    setStatus("idle");
-    setSizeCm(15);
-    setCart([]);
-    setOrderId(null);
-    setReceipt(null);
-    setSelectedMenu(null);
-    setState("START");
-  };
-
-  // 텍스트로 NLU 수행 (음성 없이)
-  async function runTextNLU(text: string) {
-    if (!text.trim()) return;
-    setSttText(text);         // STT 결과처럼 화면에 표시
-    setStatus("transcribed"); // 상태도 동일하게
-
-    const knownNames = ingredients.length
-      ? ingredients.map((i) => i.name)
-      : ["양파","할라피뇨","피클","토마토","올리브","랜치","머스타드","마요","스위트어니언"];
-
-    const nluEndpoint = USE_LLM_NLU ? `${API}/nlu_llm` : `${API}/nlu`;
-    const body = USE_LLM_NLU
-      ? { text, context: state, menu_count: menus.length || 10, known_ingredients: knownNames }
-      : { text, context: state };
-
-    const nluRes = await fetch(nluEndpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const nlu = await nluRes.json();
-    setNluResult(nlu);
-    handleIntent(nlu.intent, nlu.slots);
+  async function startRecording() {
+    try {
+      setSttText(""); setStatus("requesting mic...");
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let mimeType = ""; for (const t of preferredTypes) if ((MediaRecorder as any).isTypeSupported?.(t)) { mimeType = t; break; }
+      const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      mediaRecorderRef.current = mr; chunksRef.current = [];
+      mr.ondataavailable = (e) => { if (e.data?.size) chunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: mr.mimeType || "audio/webm" });
+        setAudioURL(URL.createObjectURL(blob)); setStatus(`recorded ${Math.round(blob.size/1024)} KB`);
+        uploadAndTranscribe(blob);
+      };
+      mr.start(); setIsRecording(true); setStatus("recording...");
+    } catch { setStatus("mic error"); }
   }
-  const onTextSubmit = (t: string) => { runTextNLU(t).catch(console.error); };
+  function stopRecording() {
+    const mr = mediaRecorderRef.current; if (mr && mr.state !== "inactive") { mr.stop(); mr.stream.getTracks().forEach((t)=>t.stop()); }
+    setIsRecording(false); setStatus("stopped");
+  }
 
-  // -------- STT → NLU --------
-  const uploadAndTranscribe = async (blobArg?: Blob) => {
-    const useBlob = blobArg ?? (audioURL ? await fetch(audioURL).then((r) => r.blob()) : null);
-    if (!useBlob) return alert("먼저 녹음하세요.");
+  function goHome() {
+    const mr = mediaRecorderRef.current; if (mr && mr.state !== "inactive") { mr.stop(); mr.stream.getTracks().forEach((t)=>t.stop()); }
+    if (typeof window !== "undefined" && "speechSynthesis" in window) (window as any).speechSynthesis.cancel();
+    setAudioURL(""); setSttText(""); setStatus("idle");
+    setCart([]); setOrderId(null); setReceipt(null); setWorking(null);
+    setState("START");
+  }
 
-    setStatus("transcribing...");
-    setSttText("");
+  async function runTextNLU(text: string) {
+    const phrase = text.trim(); if (!phrase) return;
+    setSttText(phrase); setStatus("transcribed");
+    if (state === "MODE_SELECT") { if (/추천/.test(phrase)) { setState("RECO_LIST"); return; } if (/직접|디렉트|커스텀/.test(phrase)) { beginDirect(); return; } }
+    if (/취소|그만|홈으로|처음으로/.test(phrase)) { setCancelConfirm(true); speakKo("홈으로 돌아가시겠습니까? 예 또는 아니오로 말씀해주세요."); return; }
+    if (cancelConfirm) { if (/^(예|네|응)$/i.test(phrase)) { setCancelConfirm(false); goHome(); return; } if (/^(아니오|아니)$/i.test(phrase)) { setCancelConfirm(false); speakKo("취소하지 않습니다."); return; } }
+    if (state === "RECO_DETAIL") { if (/^(예|네|응)$/i.test(phrase)) { if (working) setState("EXTRA_SELECT"); return; } if (/^(아니오|아니)$/i.test(phrase)) { setState("BREAD_SELECT"); return; } }
 
-    const blob = useBlob;
-    const ext =
-      blob.type.includes("webm") ? "webm" :
-      blob.type.includes("mp4")  ? "mp4"  :
-      blob.type.includes("m4a")  ? "m4a"  : "webm";
-    const fd = new FormData();
-    fd.append("file", blob, `record.${ext}`);
+    const known = ingredients.length ? ingredients.map(i=>i.name) : ["양상추","토마토","오이","피망","양파","피클","할라피뇨","올리브","랜치","래디쉬","올리브오일","스위트칠리","핫칠리","레드와인식초","마요네즈","후추","에그마요","페퍼로니","베이컨","아보카도","오믈렛","허니오트","플랫","파마산오레가노","위트","슈레드","아메리칸","모짜렐라"];
+    const endpoint = USE_LLM_NLU ? `${API}/nlu_llm` : `${API}/nlu`;
+    const body: any = USE_LLM_NLU ? { text: phrase, context: state, menu_count: menus.length || 10, known_ingredients: known } : { text: phrase, context: state };
+    try {
+      const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const nlu = await res.json();
+      handleIntent(String(nlu?.intent || "NONE"), nlu?.slots || {});
+    } catch {}
+  }
 
-    const resp = await fetch(`${API}/transcribe`, { method: "POST", body: fd });
-    if (!resp.ok) {
-      const t = await resp.text();
-      console.error("Transcribe failed", resp.status, t);
-      setStatus(`error: transcribe failed ${resp.status}`);
-      return;
+  function handleIntent(intent: string, slots?: any) {
+    if (cancelConfirm) { if (intent === "CONFIRM_YES") { setCancelConfirm(false); goHome(); return; } if (intent === "CONFIRM_NO") { setCancelConfirm(false); speakKo("취소하지 않습니다."); return; } }
+    if (intent === "CANCEL_ORDER") { setCancelConfirm(true); speakKo("홈으로 돌아가시겠습니까? 예 또는 아니오로 말씀해주세요."); return; }
+    if (intent === "GO_BACK") {
+      const back: Record<KioskState, KioskState> = { START:"START", MODE_SELECT:"START", THEME_SELECT:"MODE_SELECT", BREAD_SELECT:"THEME_SELECT", CHEESE_SELECT:"BREAD_SELECT", VEGE_SELECT:"CHEESE_SELECT", SAUCE_SELECT:"VEGE_SELECT", EXTRA_SELECT:"SAUCE_SELECT", REVIEW:"MODE_SELECT", RECO_LIST:"MODE_SELECT", RECO_DETAIL:"RECO_LIST", PAYMENT:"REVIEW", END:"START" };
+      setState((s)=>back[s] ?? "MODE_SELECT"); return;
     }
-    const data = await resp.json();
-    if (!data.text || data.text.trim().length === 0) {
-      setStatus("error: empty transcription result");
-      return;
-    }
-    setSttText(data.text);
-    setStatus("transcribed");
+    if (intent === "ORDER_CONFIRM" && state === "REVIEW") { confirmAndSend(); return; }
+    if (intent === "SET_INGREDIENTS") { applyNLUToCurrentStep(slots || {}); return; }
+  }
 
-    const knownNames = ingredients.length
-      ? ingredients.map((i) => i.name)
-      : ["양파","할라피뇨","피클","토마토","올리브","랜치","머스타드","마요","스위트어니언"];
+  function beginDirect() {
+    setWorking({ menu_id: 0, name: "", size_cm: 15, quantity: 1, picks: { bread: null, cheese: null, vegetables: [], sauces: [], extras: [] }, ingredients_ops: { ADD: [], EXCLUDE: [] } });
+    setState("THEME_SELECT");
+  }
+  function selectTheme(m: Menu) { if (!working) beginDirect(); setWorking((w)=> w ? { ...w, menu_id: m.id, name: m.name, size_cm: 15 } : w); setState("BREAD_SELECT"); }
+  function selectBread(n: string) { if (!working) return; setWorking({ ...working, picks: { ...working.picks, bread: n }}); setState("CHEESE_SELECT"); }
+  function selectCheese(n: string) { if (!working) return; setWorking({ ...working, picks: { ...working.picks, cheese: n }}); setState("VEGE_SELECT"); }
+  function togglePick(cat: "vegetables"|"sauces"|"extras", n: string) { if (!working) return; const s = new Set(working.picks[cat]); s.has(n)?s.delete(n):s.add(n); setWorking({ ...working, picks: { ...working.picks, [cat]: Array.from(s) as any }}); }
+  function doneVegetables(){ setState("SAUCE_SELECT"); }
+  function doneSauces(){ setState("EXTRA_SELECT"); }
+  function skipExtras(){ pushWorkingToCart(); }
 
-    const nluEndpoint = USE_LLM_NLU ? `${API}/nlu_llm` : `${API}/nlu`;
-    const body = USE_LLM_NLU
-      ? { text: data.text, context: state, menu_count: menus.length || 10, known_ingredients: knownNames }
-      : { text: data.text, context: state };
+  function pushWorkingToCart() {
+    if (!working) return;
+    const item: CartItem = { ...working, ingredients_ops: buildOps(working.picks) };
+    setCart((prev)=>[...prev, item]); setWorking(null); setState("REVIEW");
+  }
+  function addMore(){ setWorking(null); setState("MODE_SELECT"); }
 
-    const nluRes = await fetch(nluEndpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const nlu = await nluRes.json();
-    setNluResult(nlu);
-    console.log("[NLU]", nlu);
-    handleIntent(nlu.intent, nlu.slots);
-  };
-
-  // -------- Intent Handler --------
-  const handleIntent = async (intent: string, slots: any) => {
-    // 취소 확인 단계 우선
-    if (cancelConfirm) {
-      if (intent === "CONFIRM_YES") {
-        if (orderId) {
-          fetch(`${API}/orders/${orderId}/cancel`, { method: "POST" }).catch(() => {});
-        }
-        setCancelConfirm(false);
-        speakKo("초기 화면으로 돌아갑니다.");
-        goHome();
-        return;
+  async function confirmAndSend() {
+    if (cart.length === 0) { speakKo("담긴 항목이 없습니다."); return; }
+    try {
+      const r = await fetch(`${API}/orders`, { method: "POST" });
+      const d = await r.json(); const oid = Number(d.order_id); setOrderId(oid);
+      for (const it of cart) {
+        await fetch(`${API}/orders/${oid}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ menu_id: it.menu_id, quantity: it.quantity, size_cm: it.size_cm, ingredients_ops: it.ingredients_ops }) });
       }
-      if (intent === "CONFIRM_NO") {
-        setCancelConfirm(false);
-        speakKo("취소하지 않습니다. 계속 진행하세요.");
-        return;
-      }
-    }
+      const rec = await fetch(`${API}/orders/${oid}`).then((rr)=>rr.json()); setReceipt(rec);
+      await fetch(`${API}/orders/${oid}/confirm`, { method: "POST" });
+      const rec2 = await fetch(`${API}/orders/${oid}`).then((rr)=>rr.json()); setReceipt(rec2);
+      setState("PAYMENT"); speakKo("주문이 완료되었습니다.");
+    } catch { speakKo("주문에 실패했습니다. 다시 시도해주세요."); }
+  }
 
-    // 전역 취소 트리거
-    if (intent === "CANCEL_ORDER") {
-      setCancelConfirm(true);
-      speakKo("홈으로 돌아가시겠습니까? 예 또는 아니오로 말씀해주세요.");
-      return;
-    }
+  const byCat = useMemo(() => (cat: Ingredient["type"]) => ingredients.filter((i)=>i.type===cat), [ingredients]);
 
-    switch (state) {
-      case "START":
-        break;
+  function applyNLUToCurrentStep(slots: any) {
+    if (!working) return;
+    const items: string[] = Array.isArray(slots?.items) ? slots.items : [];
+    const ops: string[] = Array.isArray(slots?.ops) ? slots.ops : [];
 
-      case "MAIN_MENU":
-        if (intent === "SELECT_MENU") {
-          const n = Number(slots?.menu_number);
-          if (Number.isFinite(n) && n >= 1 && n <= menus.length) setSelectedMenu(menus[n - 1]);
-          setSizeCm(15);
-          setState("MENU_DETAIL");
-        }
-        break;
+    const setSingle = (cat: "bread"|"cheese") => {
+      const catalog = byCat(cat).map(i=>i.name);
+      const pick = items.find(n=>catalog.includes(n)); if (!pick) return;
+      if (cat === "bread") setWorking({ ...working, picks: { ...working.picks, bread: pick } });
+      else setWorking({ ...working, picks: { ...working.picks, cheese: pick } });
+    };
+    const setMulti = (cat: "vegetables"|"sauces"|"extras", full: Ingredient["type"]) => {
+      const catalog = byCat(full).map(i=>i.name);
+      let sel = new Set(working.picks[cat]);
+      if (ops.includes("ALL")) sel = new Set(catalog);
+      if (ops.includes("ONLY")) sel = new Set(items.filter(n=>catalog.includes(n)));
+      if (ops.includes("ADD")) items.forEach(n=>{ if (catalog.includes(n)) sel.add(n); });
+      if (ops.includes("EXCLUDE")) items.forEach(n=> sel.delete(n));
+      setWorking({ ...working, picks: { ...working.picks, [cat]: Array.from(sel) as any } });
+    };
 
-      case "MENU_DETAIL":
-        if (intent === "READ_MENU_DESC") {
-          selectedMenu?.description && speakKo(selectedMenu.description);
-        } else if (intent === "ORDER_CONFIRM") {
-          setIngredientOps({ ADD: [], EXCLUDE: [] });
-          setState("VEGETABLE_SELECTION");
-        } else if (intent === "GO_BACK") {
-          setState("MAIN_MENU");
-        }
-        break;
+    if (state === "BREAD_SELECT") return setSingle("bread");
+    if (state === "CHEESE_SELECT") return setSingle("cheese");
+    if (state === "VEGE_SELECT") return setMulti("vegetables","vegetable");
+    if (state === "SAUCE_SELECT") return setMulti("sauces","sauce");
+    if (state === "EXTRA_SELECT") return setMulti("extras","extra");
+  }
 
-      case "VEGETABLE_SELECTION":
-        if (intent === "SET_INGREDIENTS") {
-          const ops: string[] = slots?.ops ?? [];
-          const items: string[] = slots?.items ?? [];
-          let next: IngredientOps = { ...ingredientOps };
+  const recommended = (menus.slice(0,4)||[]).map((m,i)=>({ theme:m, combo:[
+    { bread:"허니오트", cheese:"아메리칸", vegetables:["양상추","토마토","오이"], sauces:["랜치"], extras:[] },
+    { bread:"플랫", cheese:"모짜렐라", vegetables:["양상추","양파","피클"], sauces:["스위트칠리"], extras:[] },
+    { bread:"파마산오레가노", cheese:"슈레드", vegetables:["양상추","토마토","올리브"], sauces:["마요네즈","후추"], extras:[] },
+    { bread:"위트", cheese:"아메리칸", vegetables:["토마토","피망","할라피뇨"], sauces:["레드와인식초"], extras:[] },
+  ][i%4]}));
 
-          if (ops.includes("ONLY")) {
-            next = { ADD: uniq(items), EXCLUDE: [] };
-          } else {
-            if (ops.includes("ADD")) {
-              next.ADD = uniq([...next.ADD, ...items]);
-              next.EXCLUDE = next.EXCLUDE.filter((x) => !next.ADD.includes(x));
-            }
-            if (ops.includes("EXCLUDE")) {
-              next.EXCLUDE = uniq([...next.EXCLUDE, ...items]);
-              next.ADD = next.ADD.filter((x) => !next.EXCLUDE.includes(x));
-            }
-          }
-          setIngredientOps(next);
+  function chooseRecommended(rec: { theme: Menu; combo: any }) {
+    setWorking({ menu_id: rec.theme.id, name: rec.theme.name, size_cm: 15, quantity: 1, picks: { bread: rec.combo.bread, cheese: rec.combo.cheese, vegetables: rec.combo.vegetables, sauces: rec.combo.sauces, extras: [] }, ingredients_ops: buildOps({ bread: rec.combo.bread, cheese: rec.combo.cheese, vegetables: rec.combo.vegetables, sauces: rec.combo.sauces, extras: [] }) });
+    setState("RECO_DETAIL");
+  }
 
-          // 로컬 장바구니에 추가하고 확인 화면으로
-          if (!selectedMenu) {
-            console.warn("selectedMenu missing");
-            setState("ORDER_CONFIRM");
-            return;
-          }
-          setCart((prev) => [
-            ...prev,
-            {
-              menu_id: selectedMenu.id,
-              name: selectedMenu.name,
-              size_cm: sizeCm,
-              quantity: 1,
-              ingredients_ops: next,
-            },
-          ]);
-          setState("ORDER_CONFIRM");
-        }
-        break;
+  function unitPriceCents(it: CartItem) { const m = menus.find(mm=>mm.id===it.menu_id); if (!m) return 0; return it.size_cm===30 ? cents(m.price_30_cents) : (cents(m.price_15_cents)||cents(m.price_cents)); }
+  const estimatedTotal = cart.reduce((s,it)=> s + unitPriceCents(it)*it.quantity, 0);
 
-      case "ORDER_CONFIRM":
-        if (intent === "ORDER_CONFIRM") {
-          if (cart.length === 0) {
-            speakKo("담긴 항목이 없습니다.");
-            break;
-          }
-          try {
-            // 1) 주문 생성
-            const r = await fetch(`${API}/orders`, { method: "POST" });
-            const d = await r.json();
-            setOrderId(d.order_id);
-            const oid = d.order_id as number;
-
-            // 2) 아이템 업로드
-            for (const it of cart) {
-              await fetch(`${API}/orders/${oid}/items`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  menu_id: it.menu_id,
-                  quantity: it.quantity,
-                  size_cm: it.size_cm,
-                  ingredients_ops: it.ingredients_ops,
-                }),
-              });
-            }
-
-            // 3) 영수증 조회
-            const rec = await fetch(`${API}/orders/${oid}`).then((r) => r.json());
-            setReceipt(rec);
-
-            // 4) 확정
-            await fetch(`${API}/orders/${oid}/confirm`, { method: "POST" });
-
-            // 5) 완료
-            setCart([]);
-            setState("END");
-            speakKo("주문이 완료되었습니다. 감사합니다.");
-          } catch (e) {
-            console.error("order confirm failed", e);
-            speakKo("주문에 실패했습니다. 다시 시도해주세요.");
-          }
-        } else if (intent === "GO_BACK") {
-          setState("MAIN_MENU");
-        }
-        break;
-    }
-  };
-
-  const goMainMenu = () => setState("MAIN_MENU");
-
-  // -------- Render --------
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-3">
               {state !== "START" && state !== "END" && (
-                <button onClick={goHome} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                  <ArrowLeft className="w-5 h-5" />
-                </button>
+                <button onClick={goHome} className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="처음으로"><Home className="w-5 h-5" /></button>
               )}
               <h1 className="text-xl font-bold text-gray-900">음성주문 키오스크</h1>
             </div>
             {orderId && state !== "START" && state !== "END" && (
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <ShoppingCart className="w-4 h-4" />
-                <span>주문번호: {orderId}</span>
-              </div>
+              <div className="flex items-center gap-2 text-sm text-gray-600"><ShoppingCart className="w-4 h-4" /><span>주문번호: {orderId}</span></div>
             )}
           </div>
         </div>
       </header>
 
-      {/* Main */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* START */}
         {state === "START" && (
           <div className="flex flex-col items-center justify-center min-h-[70vh]">
             <div className="text-center">
-              <div className="w-32 h-32 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-8">
-                <Volume2 className="w-16 h-16 text-white" />
-              </div>
+              <div className="w-32 h-32 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-8"><Volume2 className="w-16 h-16 text-white" /></div>
               <h2 className="text-3xl font-bold text-gray-900 mb-4">음성으로 간편하게 주문하세요</h2>
-              <p className="text-gray-600 mb-8">마이크 버튼을 누르고 원하는 메뉴를 말씀해주세요</p>
-              <button
-                onClick={goMainMenu}
-                className="bg-green-500 text-white px-8 py-4 rounded-lg text-lg font-semibold hover:bg-green-600 transition-colors shadow-lg"
-              >
-                주문 시작하기
-              </button>
+              <p className="text-gray-600 mb-8">시작을 누르면 "추천" 또는 "직접선택"을 고를 수 있어요.</p>
+              <button onClick={() => setState("MODE_SELECT")} className="bg-green-500 text-white px-8 py-4 rounded-lg text-lg font-semibold hover:bg-green-600 transition-colors shadow-lg">주문 시작하기</button>
             </div>
           </div>
         )}
 
-        {/* MAIN_MENU */}
-        {state === "MAIN_MENU" && (
-          <div>
-            <div className="mb-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">인기 메뉴</h2>
-              <p className="text-gray-600">원하시는 메뉴의 번호를 말씀해주세요</p>
-            </div>
+        {state === "MODE_SELECT" && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <button className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition p-6 text-left" onClick={() => setState("RECO_LIST")}> 
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">추천 메뉴</h3>
+              <p className="text-gray-600">베스트 조합 4가지를 보여드립니다.</p>
+            </button>
+            <button className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition p-6 text-left" onClick={beginDirect}> 
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">직접 선택</h3>
+              <p className="text-gray-600">테마 → 빵 → 치즈 → 야채 → 소스 → 추가 순서로 직접 구성합니다.</p>
+            </button>
+            <VoicePanel isRecording={isRecording} startRecording={startRecording} stopRecording={stopRecording} uploadAndTranscribe={()=>uploadAndTranscribe()} audioURL={audioURL} status={status} sttText={sttText} runTextNLU={runTextNLU} />
+          </div>
+        )}
 
-            {menusLoading && (
-              <div className="text-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto"></div>
-                <p className="mt-4 text-gray-600">메뉴를 불러오는 중...</p>
-              </div>
-            )}
-
-            {menusError && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">{menusError}</div>
-            )}
-
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
-              {menus.slice(0, 10).map((m, idx) => (
-                <button
-                  key={m.id}
-                  onClick={() => {
-                    setSelectedMenu(m);
-                    setState("MENU_DETAIL");
-                  }}
-                  className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow border border-gray-200 overflow-hidden text-left"
-                >
-                  <div className="aspect-square bg-gray-100 relative">
-                    {m.image_url ? (
-                      <img src={m.image_url} alt={m.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-400">이미지 없음</div>
-                    )}
-                    <div className="absolute top-2 left-2 bg-green-500 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold">
-                      {idx + 1}
-                    </div>
-                  </div>
+        {state === "THEME_SELECT" && (
+          <section>
+            <SectionHeader title="샌드위치 테마 선택" hint="K바비큐, 스테이크&치즈, 로스트 치킨, 이탈리안 B.M.T 등" />
+            {menusLoading && <Loader text="메뉴를 불러오는 중..." />}
+            {menusError && <ErrorBox text={menusError} />}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+              {menus.slice(0, 10).map((m) => (
+                <button key={m.id} onClick={() => selectTheme(m)} className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow border border-gray-200 overflow-hidden text-left">
+                  <div className="aspect-square bg-gray-100">{m.image_url ? <img src={m.image_url} alt={m.name} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-gray-400">이미지 없음</div>}</div>
                   <div className="p-3">
                     <h3 className="font-semibold text-gray-900 mb-1">{m.name}</h3>
-                    <p className="text-sm text-gray-600">
-                      {typeof m.price_15_cents === "number"
-                        ? `₩${(m.price_15_cents / 100).toLocaleString()}~`
-                        : typeof m.price_cents === "number"
-                        ? `₩${(m.price_cents / 100).toLocaleString()}`
-                        : "가격 정보 없음"}
-                    </p>
+                    <p className="text-sm text-gray-600">{typeof m.price_15_cents === "number" ? `₩${(m.price_15_cents/100).toLocaleString()}~` : typeof m.price_cents === "number" ? `₩${(m.price_cents/100).toLocaleString()}` : "가격 정보 없음"}</p>
                   </div>
                 </button>
               ))}
             </div>
-
-            <VoiceControl
-              isRecording={isRecording}
-              onStartRecording={startRecording}
-              onStopRecording={stopRecording}
-              onTranscribe={() => uploadAndTranscribe()}
-              audioURL={audioURL}
-              status={status}
-              sttText={sttText}
-              nluResult={nluResult}
-              onTextSubmit={onTextSubmit}
-            />
-          </div>
+            <Tip bullets={["뒤로 가려면 '이전'이라고 말하세요.", "취소하면 첫 화면으로 돌아갑니다."]} />
+            <VoicePanel isRecording={isRecording} startRecording={startRecording} stopRecording={stopRecording} uploadAndTranscribe={()=>uploadAndTranscribe()} audioURL={audioURL} status={status} sttText={sttText} runTextNLU={runTextNLU} />
+          </section>
         )}
 
-        {/* MENU_DETAIL */}
-        {state === "MENU_DETAIL" && selectedMenu && (
-          <div>
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden mb-6">
-              <div className="aspect-video bg-gray-100">
-                {selectedMenu.image_url ? (
-                  <img src={selectedMenu.image_url} alt={selectedMenu.name} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-gray-400">이미지 없음</div>
-                )}
-              </div>
-              <div className="p-6">
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">{selectedMenu.name}</h2>
-                <p className="text-gray-600 mb-4">{selectedMenu.description}</p>
+        {state === "BREAD_SELECT" && (
+          <>
+            <SelectorStep title="빵 선택" items={byCat("bread")} selected={[working?.picks.bread || ""]} onPick={(n)=>selectBread(n)} multi={false} footer={<NavRow onBack={()=>setState("THEME_SELECT")} onNext={()=>setState("CHEESE_SELECT")} nextDisabled={!working?.picks.bread} />} />
+            <VoicePanel isRecording={isRecording} startRecording={startRecording} stopRecording={stopRecording} uploadAndTranscribe={()=>uploadAndTranscribe()} audioURL={audioURL} status={status} sttText={sttText} runTextNLU={runTextNLU} />
+          </>
+        )}
 
-                <div className="border-t border-gray-200 pt-4">
-                  <h3 className="font-semibold text-gray-900 mb-3">사이즈 선택</h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={() => setSizeCm(15)}
-                      className={`p-4 border-2 rounded-lg transition-all ${
-                        sizeCm === 15 ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-gray-300"
-                      }`}
-                    >
-                      <div className="font-semibold text-gray-900">15cm</div>
-                      <div className="text-sm text-gray-600">
-                        {typeof selectedMenu.price_15_cents === "number"
-                          ? `₩${(selectedMenu.price_15_cents / 100).toLocaleString()}`
-                          : "-"}
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => setSizeCm(30)}
-                      className={`p-4 border-2 rounded-lg transition-all ${
-                        sizeCm === 30 ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-gray-300"
-                      }`}
-                    >
-                      <div className="font-semibold text-gray-900">30cm</div>
-                      <div className="text-sm text-gray-600">
-                        {typeof selectedMenu.price_30_cents === "number"
-                          ? `₩${(selectedMenu.price_30_cents / 100).toLocaleString()}`
-                          : "-"}
-                      </div>
-                    </button>
+        {state === "CHEESE_SELECT" && (
+          <>
+            <SelectorStep title="치즈 선택" items={byCat("cheese")} selected={[working?.picks.cheese || ""]} onPick={(n)=>selectCheese(n)} multi={false} footer={<NavRow onBack={()=>setState("BREAD_SELECT")} onNext={()=>setState("VEGE_SELECT")} nextDisabled={!working?.picks.cheese} />} />
+            <VoicePanel isRecording={isRecording} startRecording={startRecording} stopRecording={stopRecording} uploadAndTranscribe={()=>uploadAndTranscribe()} audioURL={audioURL} status={status} sttText={sttText} runTextNLU={runTextNLU} />
+          </>
+        )}
+
+        {state === "VEGE_SELECT" && (
+          <>
+            <SelectorStep title="야채 선택" items={byCat("vegetable")} selected={working?.picks.vegetables || []} onPick={(n)=>togglePick("vegetables", n)} multi={true} footer={<NavRow onBack={()=>setState("CHEESE_SELECT")} onNext={doneVegetables} />} />
+            <VoicePanel isRecording={isRecording} startRecording={startRecording} stopRecording={stopRecording} uploadAndTranscribe={()=>uploadAndTranscribe()} audioURL={audioURL} status={status} sttText={sttText} runTextNLU={runTextNLU} />
+          </>
+        )}
+
+        {state === "SAUCE_SELECT" && (
+          <>
+            <SelectorStep title="소스 선택" items={byCat("sauce")} selected={working?.picks.sauces || []} onPick={(n)=>togglePick("sauces", n)} multi={true} footer={<NavRow onBack={()=>setState("VEGE_SELECT")} onNext={doneSauces} />} />
+            <VoicePanel isRecording={isRecording} startRecording={startRecording} stopRecording={stopRecording} uploadAndTranscribe={()=>uploadAndTranscribe()} audioURL={audioURL} status={status} sttText={sttText} runTextNLU={runTextNLU} />
+          </>
+        )}
+
+        {state === "EXTRA_SELECT" && (
+          <>
+            <SelectorStep title="추가 선택 (선택 사항)" items={byCat("extra")} selected={working?.picks.extras || []} onPick={(n)=>togglePick("extras", n)} multi={true} footer={<div className="flex gap-3"><button onClick={()=>setState("SAUCE_SELECT")} className="flex-1 bg-white text-gray-900 border-2 border-gray-300 px-6 py-4 rounded-lg font-semibold hover:bg-gray-50 transition-colors">이전</button><button onClick={skipExtras} className="flex-1 bg-gray-200 text-gray-900 px-6 py-4 rounded-lg font-semibold hover:bg-gray-300 transition-colors">건너뛰기</button><button onClick={pushWorkingToCart} className="flex-1 bg-green-500 text-white px-6 py-4 rounded-lg font-semibold hover:bg-green-600 transition-colors shadow-lg">선택 완료</button></div>} />
+            <VoicePanel isRecording={isRecording} startRecording={startRecording} stopRecording={stopRecording} uploadAndTranscribe={()=>uploadAndTranscribe()} audioURL={audioURL} status={status} sttText={sttText} runTextNLU={runTextNLU} />
+          </>
+        )}
+
+        {state === "RECO_LIST" && (
+          <section>
+            <SectionHeader title="추천 메뉴" hint="베스트 4가지 조합을 보여드립니다." />
+            {menusLoading && <Loader text="메뉴를 불러오는 중..." />}
+            {menusError && <ErrorBox text={menusError} />}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {recommended.map((r, idx) => (
+                <button key={r.theme.id} onClick={() => chooseRecommended(r)} className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow border border-gray-200 overflow-hidden text-left">
+                  <div className="aspect-video bg-gray-100">{r.theme.image_url ? <img src={r.theme.image_url} alt={r.theme.name} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-gray-400">이미지 없음</div>}</div>
+                  <div className="p-3">
+                    <div className="text-sm text-gray-500">추천 #{idx+1}</div>
+                    <h3 className="font-semibold text-gray-900 mb-1">{r.theme.name}</h3>
+                    <p className="text-xs text-gray-600">{r.combo.bread} / {r.combo.cheese} / {r.combo.vegetables.join(", ")} / {r.combo.sauces.join(", ")}</p>
                   </div>
-                </div>
-              </div>
+                </button>
+              ))}
             </div>
-
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-              <p className="text-sm text-blue-900">
-                💡 "메뉴 설명해줘" - 메뉴 정보 듣기<br />
-                💡 "주문하기" - 재료 선택으로 이동<br />
-                💡 "이전으로 돌아가" - 메뉴 목록으로
-              </p>
-            </div>
-
-            <VoiceControl
-              isRecording={isRecording}
-              onStartRecording={startRecording}
-              onStopRecording={stopRecording}
-              onTranscribe={() => uploadAndTranscribe()}
-              audioURL={audioURL}
-              status={status}
-              sttText={sttText}
-              nluResult={nluResult}
-              onTextSubmit={onTextSubmit}
-            />
-          </div>
+            <Tip bullets={["추천 조합을 눌러 자세히 보고 선택하세요.", "'직접선택'으로 돌아가려면 이전을 누르세요."]} />
+            <VoicePanel isRecording={isRecording} startRecording={startRecording} stopRecording={stopRecording} uploadAndTranscribe={()=>uploadAndTranscribe()} audioURL={audioURL} status={status} sttText={sttText} runTextNLU={runTextNLU} />
+          </section>
         )}
 
-        {/* VEGETABLE_SELECTION */}
-        {state === "VEGETABLE_SELECTION" && (
-          <div>
-            <div className="mb-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">재료 선택</h2>
-              <p className="text-gray-600">추가하거나 제외할 재료를 말씀해주세요</p>
+        {state === "RECO_DETAIL" && working && (
+          <section>
+            <SectionHeader title="추천 조합 확인" hint="이대로 진행하시겠습니까? 예/아니오" />
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+              <h3 className="text-xl font-bold text-gray-900 mb-4">{working.name}</h3>
+              <ul className="text-gray-800 space-y-1">
+                <li><b>빵</b>: {working.picks.bread}</li>
+                <li><b>치즈</b>: {working.picks.cheese}</li>
+                <li><b>야채</b>: {working.picks.vegetables.join(", ") || "없음"}</li>
+                <li><b>소스</b>: {working.picks.sauces.join(", ") || "없음"}</li>
+              </ul>
             </div>
-
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-              <p className="text-sm text-blue-900">
-                💡 "양파 빼고 전부 추가해줘"<br />
-                💡 "랜치 소스만 넣어줘"<br />
-                💡 "토마토 추가해줘"
-              </p>
+            <div className="flex gap-3">
+              <button onClick={() => setState("BREAD_SELECT")} className="flex-1 bg-white text-gray-900 border-2 border-gray-300 px-6 py-4 rounded-lg font-semibold hover:bg-gray-50 transition-colors">아니오 (빵부터 변경)</button>
+              <button onClick={() => setState("EXTRA_SELECT")} className="flex-1 bg-green-500 text-white px-6 py-4 rounded-lg font-semibold hover:bg-green-600 transition-colors shadow-lg">예 (추가 선택으로)</button>
             </div>
+            <VoicePanel isRecording={isRecording} startRecording={startRecording} stopRecording={stopRecording} uploadAndTranscribe={()=>uploadAndTranscribe()} audioURL={audioURL} status={status} sttText={sttText} runTextNLU={runTextNLU} />
+          </section>
+        )}
 
-            {ingredients.length > 0 && (
+        {state === "REVIEW" && (
+          <section>
+            <SectionHeader title="주문 확인" hint="추가 주문을 누르면 2단계(모드 선택)부터 다시 시작합니다." />
+            {cart.length === 0 ? (
+              <p className="text-gray-500">장바구니가 비어있습니다.</p>
+            ) : (
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-                <h3 className="font-semibold text-gray-900 mb-4">사용 가능한 재료</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {ingredients.map((ing) => {
-                    const add = ingredientOps.ADD.includes(ing.name);
-                    const ex = ingredientOps.EXCLUDE.includes(ing.name);
+                <ul className="space-y-4">
+                  {cart.map((it, i) => {
+                    const unit = unitPriceCents(it);
+                    const subtotal = unit * it.quantity;
                     return (
-                      <div
-                        key={ing.id}
-                        className={`p-3 rounded-lg border-2 transition-all ${
-                          add ? "border-green-500 bg-green-50"
-                          : ex  ? "border-red-500 bg-red-50"
-                                : "border-gray-200 bg-gray-50"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          {add && <Plus className="w-4 h-4 text-green-600" />}
-                          {ex && <X className="w-4 h-4 text-red-600" />}
-                          <span className="font-medium text-gray-900">{ing.name}</span>
-                        </div>
-                        <div className="text-xs text-gray-500 mt-1">{ing.type}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {(ingredientOps.ADD.length > 0 || ingredientOps.EXCLUDE.length > 0) && (
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-                <h3 className="font-semibold text-gray-900 mb-2">현재 선택 옵션</h3>
-                <div className="space-y-2 text-sm">
-                  {ingredientOps.ADD.length > 0 && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-green-600 font-medium">추가:</span>
-                      <span className="text-gray-900">{ingredientOps.ADD.join(", ")}</span>
-                    </div>
-                  )}
-                  {ingredientOps.EXCLUDE.length > 0 && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-red-600 font-medium">제외:</span>
-                      <span className="text-gray-900">{ingredientOps.EXCLUDE.join(", ")}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <VoiceControl
-              isRecording={isRecording}
-              onStartRecording={startRecording}
-              onStopRecording={stopRecording}
-              onTranscribe={() => uploadAndTranscribe()}
-              audioURL={audioURL}
-              status={status}
-              sttText={sttText}
-              nluResult={nluResult}
-              onTextSubmit={onTextSubmit}
-            />
-          </div>
-        )}
-
-        {/* ORDER_CONFIRM */}
-        {state === "ORDER_CONFIRM" && (
-          <div>
-            <div className="mb-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">주문 확인</h2>
-              <p className="text-gray-600">주문 내용을 확인하고 결제를 진행해주세요</p>
-            </div>
-
-            {/* 서버 영수증(확정 후) */}
-            {receipt && (
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-                <h3 className="font-semibold text-gray-900 mb-4 pb-3 border-b border-gray-200">주문 내역</h3>
-                {Array.isArray(receipt?.items) && receipt.items.length > 0 ? (
-                  <div className="space-y-4">
-                    {receipt.items.map((it: any) => (
-                      <div key={it.id} className="border border-gray-200 rounded-lg p-4">
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="flex-1">
-                            <h4 className="font-semibold text-gray-900">{it.name}</h4>
-                            <p className="text-sm text-gray-600">{it.size_cm ?? 15}cm</p>
-                            {it.ingredients_ops &&
-                              (it.ingredients_ops.ADD?.length || it.ingredients_ops.EXCLUDE?.length) && (
-                                <div className="text-xs text-gray-500 mt-1">
-                                  {it.ingredients_ops.ADD?.length > 0 && `+ ${it.ingredients_ops.ADD.join(", ")}`}
-                                  {it.ingredients_ops.EXCLUDE?.length > 0 && ` - ${it.ingredients_ops.EXCLUDE.join(", ")}`}
-                                </div>
-                              )}
+                      <li key={i} className="border border-gray-200 rounded-lg p-4">
+                        <div className="flex justify-between">
+                          <div>
+                            <div className="font-semibold text-gray-900">{it.name} <span className="text-gray-600">({it.size_cm}cm)</span></div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              {it.picks.bread} / {it.picks.cheese} / {it.picks.vegetables.join(", ")} / {it.picks.sauces.join(", ")}
+                              {it.picks.extras.length ? ` / +${it.picks.extras.join(", ")}` : ""}
+                            </div>
                           </div>
                           <div className="text-right">
-                            <div className="font-semibold text-gray-900">
-                              ₩{(((it.unit_price_cents ?? it.price_cents ?? 0) * it.quantity) / 100).toLocaleString()}
-                            </div>
-                            <div className="text-sm text-gray-600">
-                              ₩{((it.unit_price_cents ?? it.price_cents ?? 0) / 100).toLocaleString()} × {it.quantity}
-                            </div>
+                            <div className="font-semibold text-gray-900">{toKRW(subtotal)}</div>
+                            <div className="text-sm text-gray-600">{toKRW(unit)} × {it.quantity}</div>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
-                          <div className="flex items-center border border-gray-300 rounded-lg">
-                            <button
-                              onClick={() => {
-                                fetch(`${API}/orders/${orderId}/items/${it.id}`, {
-                                  method: "PATCH",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ op: "dec", delta: 1 }),
-                                }).then(() =>
-                                  fetch(`${API}/orders/${orderId}`).then((r) => r.json()).then(setReceipt)
-                                );
-                              }}
-                              className="p-2 hover:bg-gray-100 transition-colors"
-                            >
-                              <Minus className="w-4 h-4" />
-                            </button>
-                            <span className="px-4 font-medium">{it.quantity}</span>
-                            <button
-                              onClick={() => {
-                                fetch(`${API}/orders/${orderId}/items/${it.id}`, {
-                                  method: "PATCH",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ op: "inc", delta: 1 }),
-                                }).then(() =>
-                                  fetch(`${API}/orders/${orderId}`).then((r) => r.json()).then(setReceipt)
-                                );
-                              }}
-                              className="p-2 hover:bg-gray-100 transition-colors"
-                            >
-                              <Plus className="w-4 h-4" />
-                            </button>
-                          </div>
-                          <button
-                            onClick={() => {
-                              fetch(`${API}/orders/${orderId}/items/${it.id}`, { method: "DELETE" }).then(() =>
-                                fetch(`${API}/orders/${orderId}`).then((r) => r.json()).then(setReceipt)
-                              );
-                            }}
-                            className="px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          >
-                            삭제
-                          </button>
+                        <div className="flex items-center gap-2 mt-3">
+                          <button onClick={() => setCart((prev) => prev.map((c, idx) => idx===i ? { ...c, quantity: Math.max(1, c.quantity-1) } : c))} className="p-2 border rounded-lg"><Minus className="w-4 h-4"/></button>
+                          <span className="px-3 font-medium">{it.quantity}</span>
+                          <button onClick={() => setCart((prev) => prev.map((c, idx) => idx===i ? { ...c, quantity: c.quantity+1 } : c))} className="p-2 border rounded-lg"><Plus className="w-4 h-4"/></button>
+                          <button onClick={() => setCart((prev) => prev.filter((_, idx) => idx!==i))} className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg">삭제</button>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-gray-500 text-center py-8">장바구니가 비어있습니다</p>
-                )}
-
-                <div className="border-t border-gray-200 mt-6 pt-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-lg font-semibold text-gray-900">총 결제금액</span>
-                    <span className="text-2xl font-bold text-green-600">₩{(receipt.total_cents / 100).toLocaleString()}</span>
-                  </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="border-t border-gray-200 mt-6 pt-4 flex justify-between items-center">
+                  <span className="text-lg font-semibold text-gray-900">예상 결제금액</span>
+                  <span className="text-2xl font-bold text-green-600">{toKRW(estimatedTotal)}</span>
                 </div>
               </div>
             )}
-
-            {/* 로컬 장바구니(확정 전 미리보기) */}
-            {!receipt && cart.length > 0 && (
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-                <h3 className="font-semibold text-gray-900 mb-4 pb-3 border-b border-gray-200">장바구니(임시)</h3>
-                <ul className="space-y-2">
-                  {cart.map((it, i) => (
-                    <li key={i} className="flex justify-between">
-                      <div>
-                        <span className="font-medium">{it.name}</span>{" "}
-                        <span className="text-gray-600">({it.size_cm}cm)</span> × {it.quantity}
-                        {(it.ingredients_ops.ADD.length || it.ingredients_ops.EXCLUDE.length) && (
-                          <div className="text-xs text-gray-500">
-                            {it.ingredients_ops.ADD.length ? ` +${it.ingredients_ops.ADD.join(", ")}` : ""}
-                            {it.ingredients_ops.EXCLUDE.length ? ` -${it.ingredients_ops.EXCLUDE.join(", ")}` : ""}
-                          </div>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-              <p className="text-sm text-blue-900">
-                💡 "주문하기" - 주문 완료<br />
-                💡 "추가 주문" - 메뉴 선택으로 돌아가기<br />
-                💡 "취소" - 주문 취소
-              </p>
+            <div className="flex gap-3">
+              <button onClick={addMore} className="flex-1 bg-white text-gray-900 border-2 border-gray-300 px-6 py-4 rounded-lg font-semibold hover:bg-gray-50 transition-colors">추가 주문</button>
+              <button onClick={confirmAndSend} className="flex-1 bg-green-500 text-white px-6 py-4 rounded-lg font-semibold hover:bg-green-600 transition-colors shadow-lg">주문 확정</button>
             </div>
-
-            <div className="flex gap-3 mb-6">
-              <button
-                onClick={() => setState("MAIN_MENU")}
-                className="flex-1 bg-white text-gray-900 border-2 border-gray-300 px-6 py-4 rounded-lg font-semibold hover:bg-gray-50 transition-colors"
-              >
-                추가 주문
-              </button>
-              <button
-                onClick={async () => {
-                  if (cart.length === 0) {
-                    speakKo("담긴 항목이 없습니다.");
-                    return;
-                  }
-                  try {
-                    const r = await fetch(`${API}/orders`, { method: "POST" });
-                    const d = await r.json();
-                    setOrderId(d.order_id);
-                    const oid = d.order_id as number;
-
-                    for (const it of cart) {
-                      await fetch(`${API}/orders/${oid}/items`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          menu_id: it.menu_id,
-                          quantity: it.quantity,
-                          size_cm: it.size_cm,
-                          ingredients_ops: it.ingredients_ops,
-                        }),
-                      });
-                    }
-                    const rec = await fetch(`${API}/orders/${oid}`).then((r) => r.json());
-                    setReceipt(rec);
-                    await fetch(`${API}/orders/${oid}/confirm`, { method: "POST" });
-
-                    setCart([]);
-                    setState("END");
-                    speakKo("주문이 완료되었습니다. 감사합니다.");
-                  } catch (e) {
-                    console.error("confirm failed", e);
-                    speakKo("주문에 실패했습니다. 다시 시도해주세요.");
-                  }
-                }}
-                className="flex-1 bg-green-500 text-white px-6 py-4 rounded-lg font-semibold hover:bg-green-600 transition-colors shadow-lg"
-              >
-                {receipt?.total_cents ? `₩${(receipt.total_cents / 100).toLocaleString()} 결제하기` : "주문 확정"}
-              </button>
-            </div>
-
-            <VoiceControl
-              isRecording={isRecording}
-              onStartRecording={startRecording}
-              onStopRecording={stopRecording}
-              onTranscribe={() => uploadAndTranscribe()}
-              audioURL={audioURL}
-              status={status}
-              sttText={sttText}
-              nluResult={nluResult}
-              onTextSubmit={onTextSubmit}
-            />
-          </div>
+            <VoicePanel isRecording={isRecording} startRecording={startRecording} stopRecording={stopRecording} uploadAndTranscribe={()=>uploadAndTranscribe()} audioURL={audioURL} status={status} sttText={sttText} runTextNLU={runTextNLU} />
+          </section>
         )}
 
-        {/* END */}
+        {state === "PAYMENT" && (
+          <section>
+            <SectionHeader title="결제 내역" hint="수량 변경 또는 항목 삭제가 가능합니다." />
+            {orderId && <ServerReceipt orderId={orderId} receipt={receipt} setReceipt={setReceipt} />}
+            <div className="flex gap-3 mt-6">
+              <button onClick={goHome} className="flex-1 bg-white text-gray-900 border-2 border-gray-300 px-6 py-4 rounded-lg font-semibold hover:bg-gray-50 transition-colors">처음으로</button>
+              <button onClick={()=>setState("END")} className="flex-1 bg-green-500 text-white px-6 py-4 rounded-lg font-semibold hover:bg-green-600 transition-colors shadow-lg">완료</button>
+            </div>
+          </section>
+        )}
+
         {state === "END" && (
           <div className="flex flex-col items-center justify-center min-h-[70vh]">
             <div className="text-center">
-              <div className="w-32 h-32 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-8">
-                <Check className="w-16 h-16 text-white" />
-              </div>
+              <div className="w-32 h-32 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-8"><Check className="w-16 h-16 text-white" /></div>
               <h2 className="text-3xl font-bold text-gray-900 mb-4">주문이 완료되었습니다</h2>
-              <p className="text-gray-600 mb-2">감사합니다!</p>
-              {receipt && (
-                <p className="text-xl font-semibold text-green-600 mb-8">
-                  결제 금액: ₩{(receipt.total_cents / 100).toLocaleString()}
-                </p>
-              )}
-              <button
-                onClick={goHome}
-                className="bg-green-500 text-white px-8 py-4 rounded-lg text-lg font-semibold hover:bg-green-600 transition-colors shadow-lg"
-              >
-                처음으로 돌아가기
-              </button>
+              <p className="text-gray-600 mb-8">감사합니다!</p>
+              <button onClick={goHome} className="bg-green-500 text-white px-8 py-4 rounded-lg text-lg font-semibold hover:bg-green-600 transition-colors shadow-lg">처음으로 돌아가기</button>
             </div>
           </div>
         )}
       </main>
     </div>
   );
+
+  async function uploadAndTranscribe(blobArg?: Blob) {
+    const useBlob = blobArg ?? (audioURL ? await fetch(audioURL).then(r=>r.blob()) : null);
+    if (!useBlob) { alert("먼저 녹음하세요."); return; }
+    setStatus("transcribing..."); setSttText("");
+    const ext = useBlob.type.includes("webm") ? "webm" : useBlob.type.includes("mp4") ? "mp4" : useBlob.type.includes("m4a") ? "m4a" : "webm";
+    const fd = new FormData(); fd.append("file", useBlob, `record.${ext}`);
+    const resp = await fetch(`${API}/transcribe`, { method: "POST", body: fd });
+    if (!resp.ok) { setStatus(`error: transcribe failed ${resp.status}`); return; }
+    const data = await resp.json(); if (!data?.text || !data.text.trim()) { setStatus("error: empty transcription"); return; }
+    setSttText(data.text); setStatus("transcribed");
+    await runTextNLU(data.text);
+  }
 }
 
-function VoiceControl({
-  isRecording,
-  onStartRecording,
-  onStopRecording,
-  onTranscribe,
-  audioURL,
-  status,
-  sttText,
-  nluResult,
-  onTextSubmit,     // ★ 추가된 prop
-}: {
-  isRecording: boolean;
-  onStartRecording: () => void;
-  onStopRecording: () => void;
-  onTranscribe: () => void;
-  audioURL: string;
-  status: string;
-  sttText: string;
-  nluResult: any;
-  onTextSubmit: (text: string) => void;  // ★ 타입 선언
-}) {
-  const [textCmd, setTextCmd] = useState("");
-
+function SectionHeader({ title, hint }: { title: string; hint?: string }) {
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-      <h3 className="font-semibold text-gray-900 mb-4">음성 입력</h3>
+    <div className="mb-6">
+      <h2 className="text-2xl font-bold text-gray-900 mb-1">{title}</h2>
+      {hint && <p className="text-gray-600 flex items-center gap-2"><CircleHelp className="w-4 h-4"/> {hint}</p>}
+    </div>
+  );
+}
+function Tip({ bullets }: { bullets: string[] }) {
+  return (
+    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 text-sm text-blue-900">
+      {bullets.map((b, i) => (<div key={i}>💡 {b}</div>))}
+    </div>
+  );
+}
+function Loader({ text }: { text: string }) {
+  return (
+    <div className="text-center py-12">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto"></div>
+      <p className="mt-4 text-gray-600">{text}</p>
+    </div>
+  );
+}
+function ErrorBox({ text }: { text: string }) {
+  return <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">{text}</div>;
+}
 
+function SelectorStep({ title, items, selected, onPick, multi, footer }:{ title: string; items: Ingredient[]; selected: string[]; onPick: (name: string) => void; multi: boolean; footer?: React.ReactNode; }) {
+  return (
+    <section>
+      <SectionHeader title={title} />
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+        {items.length === 0 ? (
+          <p className="text-gray-500">선택 가능한 항목이 없습니다. (재료가 등록되어 있는지 확인)</p>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {items.map((ing) => {
+              const isActive = selected.includes(ing.name);
+              return (
+                <button key={ing.id} onClick={() => onPick(ing.name)} className={`p-3 rounded-lg border-2 transition-all text-left ${isActive ? "border-green-500 bg-green-50" : "border-gray-200 bg-gray-50 hover:border-gray-300"}`}>
+                  <div className="font-medium text-gray-900">{ing.name}</div>
+                  <div className="text-xs text-gray-500 mt-1">{ing.type}</div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {footer}
+    </section>
+  );
+}
+
+function NavRow({ onBack, onNext, nextDisabled }: { onBack: ()=>void; onNext: ()=>void; nextDisabled?: boolean }) {
+  return (
+    <div className="flex gap-3">
+      <button onClick={onBack} className="flex-1 bg-white text-gray-900 border-2 border-gray-300 px-6 py-4 rounded-lg font-semibold hover:bg-gray-50 transition-colors">이전</button>
+      <button onClick={onNext} disabled={nextDisabled} className="flex-1 bg-green-500 text-white px-6 py-4 rounded-lg font-semibold hover:bg-green-600 transition-colors shadow-lg disabled:bg-gray-300 disabled:cursor-not-allowed">다음</button>
+    </div>
+  );
+}
+
+function VoicePanel({ isRecording, startRecording, stopRecording, uploadAndTranscribe, audioURL, status, sttText, runTextNLU }:{ isRecording: boolean; startRecording: ()=>void; stopRecording: ()=>void; uploadAndTranscribe: ()=>void; audioURL: string; status: string; sttText: string; runTextNLU: (t: string)=>void; }) {
+  const [textCmd, setTextCmd] = useState("");
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mt-6">
+      <h3 className="font-semibold text-gray-900 mb-4">음성/텍스트 입력</h3>
       <div className="flex items-center gap-3 mb-4">
         {!isRecording ? (
-          <button
-            onClick={onStartRecording}
-            className="flex items-center gap-2 bg-green-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-600 transition-colors shadow-md"
-          >
-            <Mic className="w-5 h-5" /> 녹음 시작
-          </button>
+          <button onClick={startRecording} className="flex items-center gap-2 bg-green-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-600 transition-colors shadow-md"><Mic className="w-5 h-5"/> 녹음 시작</button>
         ) : (
-          <button
-            onClick={onStopRecording}
-            className="flex items-center gap-2 bg-red-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-600 transition-colors shadow-md animate-pulse"
-          >
-            <MicOff className="w-5 h-5" /> 녹음 중지
-          </button>
+          <button onClick={stopRecording} className="flex items-center gap-2 bg-red-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-600 transition-colors shadow-md animate-pulse"><MicOff className="w-5 h-5"/> 녹음 중지</button>
         )}
-
-        <button
-          onClick={onTranscribe}
-          disabled={!audioURL}
-          className="flex items-center gap-2 bg-blue-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-600 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
-        >
-          음성 인식
-        </button>
-
-        <div className="flex-1 text-sm text-gray-600">
-          상태: <span className="font-medium">{status}</span>
-        </div>
+        <button onClick={uploadAndTranscribe} disabled={!audioURL} className="flex items-center gap-2 bg-blue-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-600 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed">음성 인식</button>
+        <div className="flex-1 text-sm text-gray-600">상태: <span className="font-medium">{status}</span></div>
       </div>
-
-      {/* 텍스트 명령 테스트 UI */}
       <div className="mt-4 border-t border-gray-200 pt-4">
         <h4 className="text-sm font-semibold text-gray-900 mb-2">텍스트로 테스트</h4>
         <div className="flex gap-2">
-          <input
-            value={textCmd}
-            onChange={(e) => setTextCmd(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                onTextSubmit(textCmd);
-                setTextCmd("");
-              }
-            }}
-            placeholder='예: "3번", "주문하기", "양파 빼고 전부 추가해줘", "취소", "예"'
-            className="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
-          />
-          <button
-            onClick={() => {
-              onTextSubmit(textCmd);
-              setTextCmd("");
-            }}
-            className="bg-blue-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-600 transition-colors"
-          >
-            실행
-          </button>
+          <input value={textCmd} onChange={(e)=>setTextCmd(e.target.value)} onKeyDown={(e)=>{ if(e.key==='Enter'){ runTextNLU(textCmd); setTextCmd(""); } }} placeholder='예: "추천", "직접선택", "허니오트 선택", "양파 빼고 전부 추가"' className="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"/>
+          <button onClick={()=>{ runTextNLU(textCmd); setTextCmd(""); }} className="bg-blue-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-600 transition-colors">실행</button>
         </div>
       </div>
-
-      {status.startsWith("error:") && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-          <p className="text-sm text-red-800">{status}</p>
-          <button onClick={onTranscribe} className="mt-2 text-sm text-red-600 underline hover:text-red-800">
-            다시 시도
-          </button>
-        </div>
-      )}
-
-      {audioURL && (
-        <div className="mb-4">
-          <audio src={audioURL} controls className="w-full" />
-        </div>
-      )}
-
       {sttText && (
-        <div className="bg-gray-50 rounded-lg p-4 mb-4">
+        <div className="bg-gray-50 rounded-lg p-4 mt-4">
           <h4 className="text-sm font-semibold text-gray-700 mb-2">인식된 텍스트</h4>
           <p className="text-gray-900">{sttText}</p>
-        </div>
-      )}
-
-      {nluResult && (
-        <div className="bg-blue-50 rounded-lg p-4">
-          <h4 className="text-sm font-semibold text-blue-900 mb-2">NLU 분석 결과</h4>
-          <div className="text-sm space-y-1">
-            <div>
-              <span className="text-blue-700 font-medium">의도:</span>{" "}
-              <span className="text-blue-900">{nluResult.intent}</span>
-            </div>
-            {nluResult.confidence !== undefined && (
-              <div>
-                <span className="text-blue-700 font-medium">신뢰도:</span>{" "}
-                <span className="text-blue-900">{(nluResult.confidence * 100).toFixed(0)}%</span>
-              </div>
-            )}
-            {nluResult.slots && Object.keys(nluResult.slots).length > 0 && (
-              <div>
-                <span className="text-blue-700 font-medium">슬롯:</span>
-                <pre className="mt-1 text-xs text-blue-900 overflow-auto">{JSON.stringify(nluResult.slots, null, 2)}</pre>
-              </div>
-            )}
-          </div>
         </div>
       )}
     </div>
   );
 }
+
+function ServerReceipt({
+  orderId,
+  receipt,
+  setReceipt,
+}: {
+  orderId: number;
+  receipt: any;
+  setReceipt: (x: any) => void;
+}) {
+  useEffect(() => {
+    fetch(`${API}/orders/${orderId}`)
+      .then((r) => r.json())
+      .then((json) => setReceipt(normalizeReceipt(json))) // ⬅️ 정규화
+      .catch(() => {});
+  }, [orderId, setReceipt]);
+
+  if (!receipt) return <Loader text="영수증을 불러오는 중..." />;
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+      <h3 className="font-semibold text-gray-900 mb-4 pb-3 border-b border-gray-200">
+        주문 내역
+      </h3>
+
+      {Array.isArray(receipt?.items) && receipt.items.length > 0 ? (
+        <div className="space-y-4">
+          {receipt.items.map((it: any) => (
+            <div key={it.id} className="border border-gray-200 rounded-lg p-4">
+              <div className="flex justify-between items-start mb-2">
+                <div className="flex-1">
+                  <h4 className="font-semibold text-gray-900">{it.name}</h4>
+                  {(it.size_cm ?? null) !== null && (
+                  <p className="text-sm text-gray-600">{it.size_cm}cm</p>
+                  )}
+
+                  {it.ingredients_ops &&
+                    (it.ingredients_ops.ADD?.length ||
+                      it.ingredients_ops.EXCLUDE?.length) && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        {it.ingredients_ops.ADD?.length > 0 &&
+                          `+ ${it.ingredients_ops.ADD.join(", ")}`}
+                        {it.ingredients_ops.EXCLUDE?.length > 0 &&
+                          ` - ${it.ingredients_ops.EXCLUDE.join(", ")}`}
+                      </div>
+                    )}
+                </div>
+
+                <div className="text-right">
+                  <div className="font-semibold text-gray-900">
+                    {toKRW(
+                      (it.unit_price_cents ?? it.price_cents ?? 0) *
+                        (it.quantity ?? 1)
+                    )}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    {toKRW(it.unit_price_cents ?? it.price_cents ?? 0)} ×{" "}
+                    {it.quantity}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 mt-3">
+                <div className="flex items-center border border-gray-300 rounded-lg">
+                  <button
+                    onClick={() => {
+                      fetch(`${API}/orders/${orderId}/items/${it.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ op: "dec", delta: 1 }),
+                      })
+                        .then(() =>
+                          fetch(`${API}/orders/${orderId}`).then((r) => r.json())
+                        )
+                        .then((json) => setReceipt(normalizeReceipt(json))) // ⬅️ 정규화
+                        .catch(() => {});
+                    }}
+                    className="p-2 hover:bg-gray-100 transition-colors"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+
+                  <span className="px-4 font-medium">{it.quantity}</span>
+
+                  <button
+                    onClick={() => {
+                      fetch(`${API}/orders/${orderId}/items/${it.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ op: "inc", delta: 1 }),
+                      })
+                        .then(() =>
+                          fetch(`${API}/orders/${orderId}`).then((r) => r.json())
+                        )
+                        .then((json) => setReceipt(normalizeReceipt(json))) // ⬅️ 정규화
+                        .catch(() => {});
+                    }}
+                    className="p-2 hover:bg-gray-100 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => {
+                    fetch(`${API}/orders/${orderId}/items/${it.id}`, {
+                      method: "DELETE",
+                    })
+                      .then(() =>
+                        fetch(`${API}/orders/${orderId}`).then((r) => r.json())
+                      )
+                      .then((json) => setReceipt(normalizeReceipt(json))) // ⬅️ 정규화
+                      .catch(() => {});
+                  }}
+                  className="px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                >
+                  삭제
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-gray-500 text-center py-8">장바구니가 비어있습니다</p>
+      )}
+    </div>
+  );
+}
+
+
+

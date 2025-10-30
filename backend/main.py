@@ -95,7 +95,7 @@ KIOSK_NLU_SCHEMA = {
 
 
 def _recalc_total(order: Order) -> int:
-    return sum((it.unit_price_cents or it.price_cents or 0) * (it.quantity or 1) for it in order.items)
+    return sum((it.unit_price_cents or 0) * (it.quantity or 1) for it in order.items)
 
 
 @app.get("/health")
@@ -348,32 +348,22 @@ def add_order_item(order_id: int, payload: dict = Body(...), db: Session = Depen
 
     menu_id = int(payload.get("menu_id"))
     qty = max(1, int(payload.get("quantity") or 1))
-    size_cm = int(payload.get("size_cm") or 0)
+    
     ops = payload.get("ingredients_ops") or {}
 
-    if size_cm not in (15, 30):
-      raise HTTPException(400, "size_cm must be 15 or 30")
 
     menu = db.get(Menu, menu_id)
     if not menu:
       raise HTTPException(404, "menu not found")
 
-    # 길이에 따른 단가 결정
-    if size_cm == 15:
-      unit = menu.price_15_cents
-    else:
-      unit = menu.price_30_cents
-    if unit is None:
-      raise HTTPException(400, "menu price for requested size is not set")
-
+    unit = menu.price_cents or 0  # 단일가 사용
     item = OrderItem(
       order_id=order.id,
       menu_id=menu.id,
       name=menu.name,
       unit_price_cents=unit,      # NEW
-      price_cents=unit,           # (호환) 표시용 유지
       quantity=qty,
-      size_cm=size_cm,            # NEW
+      size_cm=None,            # NEW
     )
     db.add(item)
     db.flush()
@@ -419,7 +409,6 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
             "id": it.id,
             "menu_id": it.menu_id,
             "name": it.name,
-            "price_cents": it.price_cents,
             "unit_price_cents": it.unit_price_cents,
             "size_cm": it.size_cm,
             "quantity": it.quantity,
