@@ -1,83 +1,200 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "Pretendard";
+  src: url("/fonts/Pretendard-Regular.woff") format("woff");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Pretendard";
+  src: url("/fonts/Pretendard-Medium.woff") format("woff");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Pretendard";
+  src: url("/fonts/Pretendard-SemiBold.woff") format("woff");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Pretendard";
+  src: url("/fonts/Pretendard-Bold.woff") format("woff");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ✅ 전역 적용 */
+body {
+  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, "Noto Sans KR", sans-serif;
+}
+
 /* ───────────────── Subway Theme ───────────────── */
-:root{
+:root {
   /* brand */
-  --sub-green:  #006241;
-  --sub-yellow: #FEDD00;
-  --sub-dark:   #004C3F;
+  --sub-green: #006241;
+  --sub-yellow: #fedd00;
+  --sub-dark: #004c3f;
 
   /* surface & text */
-  --bg:   #F6F7F6;
-  --card: #FFFFFF;
-  --ink:  #0F172A;
+  --bg: #f6f7f6;
+  --card: #ffffff;
+  --ink: #0f172a;
 
   /* border & shadow */
-  --line: #E5E7EB;
-  --shadow: 0 6px 18px rgba(0,0,0,.06);
+  --line: #e5e7eb;
+  --shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
 }
 
 /* 다크모드(옵션) */
 @media (prefers-color-scheme: dark) {
-  :root{
-    --bg:#0B0E0C; --card:#0F1311; --ink:#E6EAE8; --line:#1F2622;
-    --sub-dark:#68D391; /* 밝은 초록 대체 */
+  :root {
+    --bg: #0b0e0c;
+    --card: #0f1311;
+    --ink: #e6eae8;
+    --line: #1f2622;
+    --sub-dark: #68d391; /* 밝은 초록 대체 */
   }
 }
 
 /* ───────────────── Base ───────────────── */
-html,body,#__next{height:100%}
-body{
-  background:var(--bg);
-  color:var(--ink);
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", Apple SD Gothic Neo, "맑은 고딕", Helvetica, Arial, sans-serif;
+html,
+body,
+#__next {
+  height: 100%;
+}
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+    "Noto Sans KR", Apple SD Gothic Neo, "맑은 고딕", Helvetica, Arial,
+    sans-serif;
 }
 
 /* ───────────────── UI Utilities ───────────────── */
-.container-narrow{max-width:1024px; margin:0 auto; padding:24px}
-
-.card{
-  background:var(--card);
-  border:1px solid var(--line);
-  border-radius:16px;
-  box-shadow:var(--shadow);
-  padding:14px;
+.container-narrow {
+  max-width: 1024px;
+  margin: 0 auto;
+  padding: 24px;
 }
 
-.btn{ 
-  display:inline-flex; align-items:center; justify-content:center;
-  padding:10px 16px; border-radius:14px; font-weight:600;
-  border:1px solid var(--line); background:#fff; color:var(--ink);
-}
-.btn:hover{ filter:brightness(.98) }
-
-.btn-sub{ background:var(--sub-green); color:#fff; border:none }
-.btn-sub:hover{ filter:brightness(.95) }
-.btn-ghost{ background:transparent }
-.btn-yellow{ background:var(--sub-yellow); color:#000; border:none }
-
-.badge{
-  display:inline-block; padding:4px 10px; border-radius:9999px;
-  border:1px solid var(--line); font-size:12px; color:#475569; background:#fff;
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 14px;
 }
 
-.chip{
-  display:inline-block; padding:6px 12px; border-radius:9999px; border:1px solid var(--line); margin:4px 6px 0 0; background:#fff;
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20px;
+  font-weight: 600;
+  background-color: #ffcd00;
+  width: 100%;
+  height: 68px;
+  color: black;
+  font-family: Pretendard-SemiBold;
+  font-size: 35px;
 }
-.chip.miss{ border-color:#EF4444; color:#DC2626; background:#FFF1F2 }
-.chip.maybe{ border-color:#F59E0B; color:#B45309; background:#FFFBEB }
+.btn:hover {
+  filter: brightness(0.98);
+}
 
-.kiosk-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:14px }
-@media (min-width: 768px){ .kiosk-grid{ grid-template-columns:repeat(5,1fr) } }
+.btn-sub {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20px;
+  font-weight: 600;
+  background-color: #008c15;
+  width: 100%;
+  height: 68px;
+  color: white;
+  font-family: Pretendard-SemiBold;
+  font-size: 35px;
+}
+.btn-sub:hover {
+  filter: brightness(0.95);
+}
+.btn-ghost {
+  background: transparent;
+}
+.btn-yellow {
+  background: var(--sub-yellow);
+  color: #000;
+  border: none;
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  color: #475569;
+  background: #fff;
+}
+
+.chip {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  border: 1px solid var(--line);
+  margin: 4px 6px 0 0;
+  background: #fff;
+}
+.chip.miss {
+  border-color: #ef4444;
+  color: #dc2626;
+  background: #fff1f2;
+}
+.chip.maybe {
+  border-color: #f59e0b;
+  color: #b45309;
+  background: #fffbeb;
+}
+
+.kiosk-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+@media (min-width: 768px) {
+  .kiosk-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
 
 /* 이미지 영역 통일감 */
-.thumb{
-  width:100%; height:110px; object-fit:contain; background:#FAFAFA; border-radius:12px; border:1px solid var(--line);
+.thumb {
+  width: 100%;
+  height: 110px;
+  object-fit: contain;
+  background: #fafafa;
+  border-radius: 12px;
+  border: 1px solid var(--line);
 }
 
 /* 링크 */
-a.link{ color:var(--sub-green); text-decoration:underline; text-underline-offset:2px }
+a.link {
+  color: var(--sub-green);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 
 /* 스크롤(부드럽게) */
-*{ scroll-behavior:smooth }
-
+* {
+  scroll-behavior: smooth;
+}
