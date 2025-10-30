@@ -1,0 +1,47 @@
+# ---------------------------------------
+# Python / FastAPI Ignore Rules
+# ---------------------------------------
+
+# bytecode / cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# virtual environments
+venv/
+.venv/
+env/
+env.bak/
+.python-version
+
+# build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# local database / cache
+*.sqlite3
+*.db
+.cache/
+.pytest_cache/
+
+# logs
+*.log
+
+# environment & secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# editor settings
+.vscode/
+.idea/
+*.code-workspace
+
+# OS specific
+.DS_Store
+Thumbs.db
